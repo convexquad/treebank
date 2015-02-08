@@ -5,6 +5,7 @@ Recursive Neural Network (RNN) for Treebank sentiment
 Written by Alex Bain (https://github.com/convexquad/treebank)
 """
 import numpy
+import os
 import treebank
 
 D = 30          # Dimensionality of our word model
@@ -12,20 +13,21 @@ R = 0.0001      # Range for the uniform dist to initialize the words
 C = treebank.C  # Number of Treebank label classes
 E = 1e-12       # Error epsilon for comparing float values to constants
 
+# Epsilon for gradient checking. Value suggested by Spare Autoencoder Notes.
+EPSILON = 1e-4
+
 # Fix numpy's random number generation for reproducible results
 numpy.random.seed(10)
 
 # Simple RNN class for Treebank sentiment analysis.
 class RNN:
-    def __init__(self, tbank, alpha, epochs):
-        self.alpha = alpha
-        self.epochs = epochs
+    def __init__(self, tbank):
         self.tbank = tbank
 	self.L = numpy.random.uniform(-R, R, (D, len(tbank.vocabulary)))
+        self.M = len(tbank.train)
         self.W = numpy.random.normal(0, 0.01, (D, 2*D + 1))
+        self.W[:, 2*D] = 0  # Set the intercept column to zero
         self.Ws = numpy.random.normal(0, 0.01, (C, D))
-        # self.W = numpy.zeros((D, 2*D + 1))
-        # self.Ws = numpy.zeros((C, D))
 
     # Makes a forward evaluation pass for a Treebank sentence.
     def forward_pass(self, node):
@@ -53,17 +55,45 @@ class RNN:
             assert abs(node.y_k.sum() - 1) < E
             return node.x_k
 
-    # Top-level function to train the RNN.
-    def train(self):
-        for i in range(self.epochs):
-            self.training_run(i + 1)
-
-    # Makes an training run on the RNN for a particular training epoch.
-    def training_run(self, epoch):
-        J = 0
-        for tree in self.tbank.dev:
+    # Make a forward pass over all sentences in the given dataset and computes
+    # the average cost per sentence J(theta) over these sentences.
+    def forward_pass_over(self, trees):
+        J = 0.0
+        for tree in trees:
             self.forward_pass(tree)
             J = J + self.compute_softmax_err(tree)
+        return (J / len(trees))
+
+    # Load pre-trained matrices from the given base directory.
+    def load_models(self, base_dir):
+        base_dir = base_dir.rstrip("/")
+        self.L = numpy.load("{}/L.npy".format(base_dir))
+        self.W = numpy.load("{}/W.npy".format(base_dir))
+        self.Ws = numpy.load("{}/Ws.npy".format(base_dir))
+
+    # Save the trained matrices to the given base directory.
+    def save_models(self, base_dir, J):
+        base_dir = base_dir.rstrip("/")
+        base_dir = "{}/model_{}_{}_{}".format(base_dir, self.alpha, self.llambda, self.epochs)
+        if not os.path.exists(base_dir):
+            os.makedirs(base_dir)
+
+        numpy.save("{}/L.npy".format(base_dir), self.L)
+        numpy.save("{}/W.npy".format(base_dir), self.W)
+        numpy.save("{}/Ws.npy".format(base_dir), self.Ws)
+        open("{}/avg_train_cost_{}.txt".format(base_dir, J), "w").close()
+
+    # Top-level function to train the RNN.
+    def train(self, trees, alpha, llambda, epochs):
+        self.alpha = alpha
+        self.llambda = llambda
+        self.epochs = epochs
+        for i in range(epochs):
+            self.training_run(trees, i + 1)
+
+    # Makes an training run on the RNN for a particular training epoch.
+    def training_run(self, trees, epoch):
+        J = self.forward_pass_over(trees)
 
         print "Cost in epoch {} is J = {}; matrix norms are W = {}, Ws = {}, L = {}".format(
             epoch, J, numpy.linalg.norm(self.W), numpy.linalg.norm(self.Ws), numpy.linalg.norm(self.L))
@@ -74,7 +104,7 @@ class RNN:
         assert W_r.shape == (D, D)
 
         # Compute the backprop deltas
-        for tree in self.tbank.dev:
+        for tree in trees:
             self.compute_softmax_delta(tree)
             self.compute_incoming_delta(tree, W_l, W_r)
 
@@ -83,32 +113,58 @@ class RNN:
         grad_W  = numpy.zeros(self.W.shape)
         grad_Ws = numpy.zeros(self.Ws.shape)
 
-        for tree in self.tbank.dev:
+        for tree in trees:
             self.compute_backprop_L(tree, grad_L, W_l, W_r)
             self.compute_backprop_W(tree, grad_W)
             self.compute_backprop_Ws(tree, grad_Ws)
 
-        # Average the word gradients by the word occurrences
-        for word in self.tbank.vocabulary:
-            word_count = self.tbank.word_count_map[word]
-            word_index = self.tbank.word_index_map[word]
-            grad_L[:, word_index] /= word_count
+        # Average the gradients by the number of sentences since we do this in
+        # the cost function.
+        grad_L  /= self.M
+        grad_W  /= self.M
+        grad_Ws /= self.M
 
-        # Average the W gradients by the number of span nodes
-        grad_W = (1.0 / self.tbank.span_node_count) * grad_W
-
-        # Average the Ws gradients by the total number of nodes
-        grad_Ws = (1.0 / self.tbank.total_node_count) * grad_Ws
+        # Check the gradients we computed against a finite difference estimate.
+        # I verified this check already, so I'll comment this out now.
+        # self.check_matrix_gradients(trees, self.L, grad_L, "grad_L")
+        # self.check_matrix_gradients(trees, self.W, grad_W, "grad_W")
+        # self.check_matrix_gradients(trees, self.Ws, grad_Ws, "grad_Ws")
 
         # Make the parameter update
-        self.L  = self.L  - ((self.alpha / epoch) * grad_L)
-        self.W  = self.W  - ((self.alpha / epoch) * grad_W)
-        self.Ws = self.Ws - ((self.alpha / epoch) * grad_Ws)
+        self.L  = self.L  - self.alpha * (grad_L  + self.llambda * self.L)
+        self.W  = self.W  - self.alpha * (grad_W  + self.llambda * self.W)
+        self.Ws = self.Ws - self.alpha * (grad_Ws + self.llambda * self.Ws)
+
+    # Check the word gradients against a finite difference estimate
+    def check_matrix_gradients(self, trees, matrix, grad, grad_name):
+        (M, N) = matrix.shape
+        for i in range(M):
+            for j in range(N):
+                Mij = matrix[i, j]
+                Gij = grad[i, j]
+
+                matrix[i, j] = Mij + EPSILON
+                J_pos = self.forward_pass_over(trees)
+
+                matrix[i, j] = Mij - EPSILON
+                J_neg = self.forward_pass_over(trees)
+
+                matrix[i, j] = Mij
+                finite_est = (J_pos - J_neg) / (2.0 * EPSILON)
+                print "{}[{}, {}]: {}, finite est: {} with difference: {}".format(grad_name, i, j, Gij, finite_est, abs(Gij - finite_est))
+
+    # Computes the training cost J(theta), assuming forward passes have already
+    # been made over all sentences.
+    def collect_tree_costs(self, trees):
+        J = 0.0
+        for tree in trees:
+            J = J + self.compute_softmax_err(tree)
+        return (J / len(trees))
 
     # When we compute the softmax cross-entropy cost, take advantage of the
     # fact that there is only one non-zero term in the sum.
     def compute_softmax_err(self, node):
-        node.J_ce_k = -numpy.log2(node.y_k[node.label])
+        node.J_ce_k = -numpy.log(node.y_k[node.label])
         assert node.J_ce_k >= 0
         if node.is_leaf():
             return node.J_ce_k
@@ -137,29 +193,31 @@ class RNN:
     def compute_incoming_delta_child(self, parent, node, W_k, W_l, W_r):
         if not node.is_leaf():
             node.delta_in_k = parent.delta_k.T.dot(W_k).T * tanh_prime(node.a_k)
-            assert len(node.delta_in_k) == D
             node.delta_k = node.delta_in_k + node.delta_sm_k
+            assert len(node.delta_k) == D
             self.compute_incoming_delta_child(node, node.left, W_l, W_l, W_r)
             self.compute_incoming_delta_child(node, node.right, W_r, W_l, W_r)
 
     # Computes the contribution to partial J / partial L for a tree.
     def compute_backprop_L(self, node, grad_L, W_l, W_r):
         if node.is_leaf():
+            grad_x_n = self.Ws.T.dot(node.y_k - node.t_k)
+            assert len(grad_x_n) == D
+            grad_L[:, node.word_index] += grad_x_n
             return
 
         if node.left.is_leaf():
             grad_x_n = node.delta_k.T.dot(W_l).T
             assert len(grad_x_n) == D
             grad_L[:, node.left.word_index] += grad_x_n
-        else:
-            self.compute_backprop_L(node.left, grad_L, W_l, W_r)
 
         if node.right.is_leaf():
             grad_x_n = node.delta_k.T.dot(W_r).T
             assert len(grad_x_n) == D
             grad_L[:, node.right.word_index] += grad_x_n
-        else:
-            self.compute_backprop_L(node.right, grad_L, W_l, W_r)
+
+        self.compute_backprop_L(node.left, grad_L, W_l, W_r)
+        self.compute_backprop_L(node.right, grad_L, W_l, W_r)
 
     # Computes the contribution to partial J / partial W for a tree.
     def compute_backprop_W(self, node, grad_W):
@@ -181,14 +239,6 @@ class RNN:
             self.compute_backprop_Ws(node.left, grad_Ws)
             self.compute_backprop_Ws(node.right, grad_Ws)
 
-    def show_word_results(self):
-        for word in self.tbank.vocabulary:
-            word_index = self.tbank.word_index_map[word]
-            word_label = self.tbank.word_label_map[word]
-            word_vectr = self.L[:, word_index]
-            prediction = softmax(self.Ws.dot(word_vectr))
-            print "WORD: {}, label: {}, prediction: {}".format(word, word_label, prediction[word_label])
-
 """
 Note that the normal softmax function is susceptible to overflow. To avoid this,
 subtract a const from each term of the input array before computing exp.
@@ -208,12 +258,15 @@ def tanh_prime(x):
 
 # Main function for the RNN.
 def main():
-    alpha = 10.0
-    epochs = 30
     tbank = treebank.build_standard_treebank()
-    rnn = RNN(tbank, alpha, epochs)
-    rnn.train()
-    rnn.show_word_results()
-   
+    rnn = RNN(tbank)
+    alpha = 0.05
+    llambda = 0.001
+    epochs = 5
+
+    rnn.train(tbank.train, alpha, llambda, epochs)
+    J = rnn.forward_pass_over(tbank.train)
+    rnn.save_models("/Users/abain/treebank/RNN/Models/Train", J)
+
 if __name__ == "__main__":
     main()

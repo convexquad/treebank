@@ -9,21 +9,30 @@ import re
 
 C = 5  # Number of Treebank label classes
 
-# Wrapper class for the Treebank datasets. Uses the "all" dataset to build the
-# vocabulary.
+# Wrapper class for the Treebank datasets.
 class Treebank:
-    def __init__(self, dev, test, train, all):
+    def __init__(self, dev, test, train):
         self.dev = dev
         self.test = test
         self.train = train
-        self.word_count_map = self.read_word_counts(dev)
-        self.word_label_map = self.read_word_labels(dev)
-        self.vocabulary = self.word_label_map.keys()
+
+        word_label_map_dev = self.read_word_labels(dev)
+        word_label_map_trn = self.read_word_labels(train)
+        word_label_map_tst = self.read_word_labels(test)
+
+        self.word_label_map = word_label_map_dev.copy()
+        self.word_label_map.update(word_label_map_trn)
+        self.word_label_map.update(word_label_map_tst)
+
+        self.vocabulary_dev = set(word_label_map_dev.keys())
+        self.vocabulary_trn = set(word_label_map_trn.keys())
+        self.vocabulary_tst = set(word_label_map_tst.keys())
+        self.vocabulary = set(self.word_label_map.keys())
+
         self.word_index_map = self.build_word_index_map(self.vocabulary)
-        self.leaf_node_count = self.count_leaf_nodes(dev)
-        self.span_node_count = self.count_span_nodes(dev)
-        self.total_node_count = self.leaf_node_count + self.span_node_count
-        self.add_word_index_trees(dev)
+        self.add_word_index_trees(self.dev)
+        self.add_word_index_trees(self.train)
+        self.add_word_index_trees(self.test)
 
     # Annotate each leaf node in a tree with an index that identifies its word
     def add_word_index_trees(self, trees):
@@ -50,48 +59,6 @@ class Treebank:
             current_index = current_index + 1
             assert len(word_index_map) == current_index
         return word_index_map
-
-    def count_leaf_nodes(self, trees):
-        count = 0
-        for tree in trees:
-            count = count + self.count_leaf_nodes_tree(tree)
-        return count
-
-    def count_leaf_nodes_tree(self, tree):
-        if tree.is_leaf():
-            return 1
-        else:
-            return (self.count_leaf_nodes_tree(tree.left) + self.count_leaf_nodes_tree(tree.right))
-
-    def count_span_nodes(self, trees):
-        count = 0
-        for tree in trees:
-            count = count + self.count_span_nodes_tree(tree)
-        return count
-
-    def count_span_nodes_tree(self, tree):
-        if tree.is_leaf():
-            return 0
-        else:
-            return (1 + self.count_span_nodes_tree(tree.left) + self.count_span_nodes_tree(tree.right))
-
-    # Function to build a map of each word to the number of times it appears.
-    def read_word_counts(self, trees):
-        word_count_map = dict()
-        for tree in trees:
-            self.read_word_counts_tree(tree, word_count_map)
-        return word_count_map
-
-    # Helper function to count the number of times each word appears.
-    def read_word_counts_tree(self, tree, word_count_map):
-        if tree.is_leaf():
-            if word_count_map.has_key(tree.word):
-                word_count_map[tree.word] = word_count_map[tree.word] + 1
-            else:
-                word_count_map[tree.word] = 1
-        else:
-            self.read_word_counts_tree(tree.left, word_count_map)
-            self.read_word_counts_tree(tree.right, word_count_map)
 
     # Function to get the words and labels for a set of trees from Treebank.
     def read_word_labels(self, trees):
@@ -182,11 +149,10 @@ def tokenize_sentence(line):
 
 # Helper function to build the Treebank object.
 def build_standard_treebank():
-    dev = read_treebank_file("/Users/abain/RNN/trees/dev.txt")
-    tst = None # read_treebank_file("/Users/abain/RNN/trees/test.txt")
-    trn = None # read_treebank_file("/Users/abain/RNN/trees/train.txt")
-    all = None # read_treebank_file("/Users/abain/RNN/trees/dev.txt")
-    return Treebank(dev, tst, trn, all)
+    dev = read_treebank_file("/Users/abain/treebank/trees/dev.txt")
+    tst = read_treebank_file("/Users/abain/treebank/trees/test.txt")
+    trn = read_treebank_file("/Users/abain/treebank/trees/train.txt")
+    return Treebank(dev, tst, trn)
 
 # Main function for testing the Treebank parser. Note that we can easily unit
 # test this code by simply diffing the printed output against the original
@@ -194,7 +160,7 @@ def build_standard_treebank():
 def main():
     treebank = build_standard_treebank()
     # for tree in treebank.dev:
-    #   print tree
+    #    print tree
     print len(treebank.vocabulary)
 
 if __name__ == "__main__":
