@@ -13,8 +13,11 @@ R = 0.0001      # Range for the uniform dist to initialize the words
 C = treebank.C  # Number of Treebank label classes
 E = 1e-12       # Error epsilon for comparing float values to constants
 
-# Epsilon for gradient checking. Value suggested by Spare Autoencoder Notes.
+# Epsilon for gradient checking. Value suggested by Spare Autoencoder notes
 EPSILON = 1e-4
+
+# Epsilon added for numerical stability of AdaGrad computation
+ADAGRAD_EPSILON = 1e-6
 
 # Fix numpy's random number generation for reproducible results
 numpy.random.seed(10)
@@ -24,7 +27,6 @@ class RNN:
     def __init__(self, tbank):
         self.tbank = tbank
 	self.L = numpy.random.uniform(-R, R, (D, len(tbank.vocabulary)))
-        self.M = len(tbank.train)
         self.W = numpy.random.normal(0, 0.01, (D, 2*D + 1))
         self.W[:, 2*D] = 0  # Set the intercept column to zero
         self.Ws = numpy.random.normal(0, 0.01, (C, D))
@@ -83,13 +85,39 @@ class RNN:
         numpy.save("{}/Ws.npy".format(base_dir), self.Ws)
         open("{}/avg_train_cost_{}.txt".format(base_dir, J), "w").close()
 
-    # Top-level function to train the RNN.
-    def train(self, trees, alpha, llambda, epochs):
+    # Top-level function to train the RNN. AdaGrad references:
+    # http://www.ark.cs.cmu.edu/cdyer/adagrad.pdf
+    # http://xcorr.net/2014/01/23/adagrad-eliminating-learning-rates-in-stochastic-gradient-descent/
+    def train(self, trees, alpha, llambda, epochs, use_adagrad):
         self.alpha = alpha
-        self.llambda = llambda
         self.epochs = epochs
+        self.llambda = llambda
+
+        hist_grad_L  = numpy.zeros(self.L.shape)
+        hist_grad_W  = numpy.zeros(self.W.shape)
+        hist_grad_Ws = numpy.zeros(self.Ws.shape)
+
         for i in range(epochs):
-            self.training_run(trees, i + 1)
+            # In each training run, compute the cost and the gradients
+            (J, grad_L, grad_W, grad_Ws) = self.training_run(trees, i + 1)
+
+            # Adjust the gradients by the regularization terms
+            grad_L  += llambda * self.L
+            grad_W  += llambda * self.W
+            grad_Ws += llambda * self.Ws
+
+            if use_adagrad:
+                hist_grad_L  += numpy.square(grad_L)
+                hist_grad_W  += numpy.square(grad_W)
+                hist_grad_Ws += numpy.square(grad_Ws)
+
+                grad_L  = grad_L  / (ADAGRAD_EPSILON + numpy.sqrt(hist_grad_L))
+                grad_W  = grad_W  / (ADAGRAD_EPSILON + numpy.sqrt(hist_grad_W))
+                grad_Ws = grad_Ws / (ADAGRAD_EPSILON + numpy.sqrt(hist_grad_Ws))
+
+            self.L  -= alpha * grad_L
+            self.W  -= alpha * grad_W
+            self.Ws -= alpha * grad_Ws
 
     # Makes an training run on the RNN for a particular training epoch.
     def training_run(self, trees, epoch):
@@ -119,10 +147,11 @@ class RNN:
             self.compute_backprop_Ws(tree, grad_Ws)
 
         # Average the gradients by the number of sentences since we do this in
-        # the cost function.
-        grad_L  /= self.M
-        grad_W  /= self.M
-        grad_Ws /= self.M
+        # the cost function and add the regularization term to the gradient.
+        M = len(trees)
+        grad_L  /= M
+        grad_W  /= M
+        grad_Ws /= M
 
         # Check the gradients we computed against a finite difference estimate.
         # I verified this check already, so I'll comment this out now.
@@ -130,10 +159,8 @@ class RNN:
         # self.check_matrix_gradients(trees, self.W, grad_W, "grad_W")
         # self.check_matrix_gradients(trees, self.Ws, grad_Ws, "grad_Ws")
 
-        # Make the parameter update
-        self.L  = self.L  - self.alpha * (grad_L  + self.llambda * self.L)
-        self.W  = self.W  - self.alpha * (grad_W  + self.llambda * self.W)
-        self.Ws = self.Ws - self.alpha * (grad_Ws + self.llambda * self.Ws)
+        # Return the cost and the gradients
+        return (J, grad_L, grad_W, grad_Ws)
 
     # Check the word gradients against a finite difference estimate
     def check_matrix_gradients(self, trees, matrix, grad, grad_name):
@@ -260,11 +287,10 @@ def tanh_prime(x):
 def main():
     tbank = treebank.build_standard_treebank()
     rnn = RNN(tbank)
-    alpha = 0.05
+    alpha = 0.01
     llambda = 0.001
-    epochs = 5
-
-    rnn.train(tbank.train, alpha, llambda, epochs)
+    epochs = 100
+    rnn.train(tbank.train, alpha, llambda, epochs, True)
     J = rnn.forward_pass_over(tbank.train)
     rnn.save_models("/Users/abain/treebank/RNN/Models/Train", J)
 

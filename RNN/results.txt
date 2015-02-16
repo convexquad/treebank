@@ -1,0 +1,23 @@
+-- alpha = 0.75, epochs = 50
+Cost in epoch 50 is J = 42.7346613275; matrix norms are W = 1.2565372809, Ws = 3.74805585719, L = 3.67653400455
+Total words: 5374, correct predictions: 4118, accuracy: 0.766282098995
+Total root nodes: 1101, correct predictions: 267, accuracy: 0.242506811989
+Total nodes: 41447, correct predictions: 28614, accuracy: 0.690375660482
+
+-- alpha = 0.75, epochs = 200
+Cost in epoch 200 is J = 39.6854997676; matrix norms are W = 1.22854507029, Ws = 4.73981264665, L = 4.71114478344
+Total words: 5374, correct predictions: 4308, accuracy: 0.801637513956
+Total root nodes: 1101, correct predictions: 284, accuracy: 0.257947320618
+Total nodes: 41447, correct predictions: 29239, accuracy: 0.705455159601
+
+-- const alpha = 0.05, epochs = 2000
+Cost in epoch 2000 is J = 6.73377328116; matrix norms are W = 19.4858251352, Ws = 21.8174200441, L = 29.9439919098
+Total words: 5374, correct predictions: 5338, accuracy: 0.993301079271
+Total root nodes: 1101, correct predictions: 706, accuracy: 0.64123524069
+Total nodes: 41447, correct predictions: 38469, accuracy: 0.928149202596
+
+-- const alpha = 0.01, epochs = 2000
+Cost in epoch 2000 is J = 23.9861944218; matrix norms are W = 6.02661120672, Ws = 11.7255736981, L = 13.2572425196
+Total words: 5374, correct predictions: 4603, accuracy: 0.856531447711
+Total root nodes: 1101, correct predictions: 310, accuracy: 0.281562216167
+Total nodes: 41447, correct predictions: 31673, accuracy: 0.764180760972
