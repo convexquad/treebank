@@ -62,7 +62,7 @@ def show_word_results(rnn, vocabulary):
 def main():
     tbank = treebank.build_standard_treebank()
     rnn = RNN(tbank)
-    rnn.load_models("/Users/abain/treebank/RNN/Models/Train/model_0.01_0.001_100")
+    rnn.load_models("/Users/abain/treebank/RNN/Models/Train/model_0.01_0.001_2000")
     J = rnn.forward_pass_over(tbank.test)
 
     print "Average cost per sentence: {}".format(J)

@@ -115,6 +115,9 @@ class RNN:
                 grad_W  = grad_W  / (ADAGRAD_EPSILON + numpy.sqrt(hist_grad_W))
                 grad_Ws = grad_Ws / (ADAGRAD_EPSILON + numpy.sqrt(hist_grad_Ws))
 
+            grad_norms = numpy.linalg.norm(grad_L) + numpy.linalg.norm(grad_W) + numpy.linalg.norm(grad_Ws)
+            print "Sum of grad norms in epoch {} is {}".format(i, grad_norms)
+
             self.L  -= alpha * grad_L
             self.W  -= alpha * grad_W
             self.Ws -= alpha * grad_Ws
@@ -289,7 +292,7 @@ def main():
     rnn = RNN(tbank)
     alpha = 0.01
     llambda = 0.001
-    epochs = 100
+    epochs = 2000
     rnn.train(tbank.train, alpha, llambda, epochs, True)
     J = rnn.forward_pass_over(tbank.train)
     rnn.save_models("/Users/abain/treebank/RNN/Models/Train", J)
